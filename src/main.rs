@@ -77,46 +77,46 @@ impl Opt {
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    let foo = Command::new("test.exe").output().unwrap();
+    // let foo = Command::new("test.exe").output().unwrap();
 
-    const PIPE: &str = "\\\\.\\pipe\\amonguspipe";
-    let mut f: std::fs::File;
-    loop {
-        let temp = std::fs::File::open(PIPE);
-        if let Ok(res) = temp {
-            f = res;
-            break;
-        } else if let Err(x) = temp {
-            println!("{}", x);
-        }
-    }
+    // const PIPE: &str = "\\\\.\\pipe\\amonguspipe";
+    // let mut f: std::fs::File;
+    // loop {
+    //     let temp = std::fs::File::open(PIPE);
+    //     if let Ok(res) = temp {
+    //         f = res;
+    //         break;
+    //     } else if let Err(x) = temp {
+    //         println!("{}", x);
+    //     }
+    // }
 
-    let mut currentPlayerState: Arc<Mutex<PlayerState>> =
-        Arc::new(Mutex::new(PlayerState::default()));
-    let mut currentPlayerState2 = currentPlayerState.clone();
-    let mut currentPlayerState3 = currentPlayerState.clone();
+    // let mut currentPlayerState: Arc<Mutex<PlayerState>> =
+    //     Arc::new(Mutex::new(PlayerState::default()));
+    // let mut currentPlayerState2 = currentPlayerState.clone();
+    // let mut currentPlayerState3 = currentPlayerState.clone();
 
-    let h1 = std::thread::spawn(move || {
-        use std::io::Read;
+    // let h1 = std::thread::spawn(move || {
+    //     use std::io::Read;
 
-        let mut r: [u8; 1024] = [0; 1024];
-        while true {
-            let len = f.read(&mut r).unwrap();
-            let s = std::str::from_utf8(&mut r[..len]).unwrap();
-            let currentPlayerStateInbound: PlayerState = serde_json::from_str(s).unwrap();
-            let mut stateLock = currentPlayerState2.lock().unwrap();
-            *stateLock = currentPlayerStateInbound;
-        }
-    });
+    //     let mut r: [u8; 1024] = [0; 1024];
+    //     while true {
+    //         let len = f.read(&mut r).unwrap();
+    //         let s = std::str::from_utf8(&mut r[..len]).unwrap();
+    //         let currentPlayerStateInbound: PlayerState = serde_json::from_str(s).unwrap();
+    //         let mut stateLock = currentPlayerState2.lock().unwrap();
+    //         *stateLock = currentPlayerStateInbound;
+    //     }
+    // });
 
-    let h2 = std::thread::spawn(move || {
-        while true {
-            let lock = currentPlayerState3.lock().unwrap();
-            println!("Player State from Thread: {:?}", lock);
-            drop(lock);
-            std::thread::sleep(std::time::Duration::from_secs(1));
-        }
-    });
+    // let h2 = std::thread::spawn(move || {
+    //     while true {
+    //         let lock = currentPlayerState3.lock().unwrap();
+    //         println!("Player State from Thread: {:?}", lock);
+    //         drop(lock);
+    //         std::thread::sleep(std::time::Duration::from_secs(1));
+    //     }
+    // });
 
     let enc = opus::Encoder::new(48000, opus::Channels::Stereo, opus::Application::Voip);
 
@@ -150,6 +150,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     // The WAV file we're recording to.
     const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/recorded.wav");
+
     // let spec = wav_spec_from_config(&config);
     // let writer = hound::WavWriter::create(PATH, spec)?;
     let encoder = Arc::new(Mutex::new(Some(writer)));
@@ -187,7 +188,7 @@ fn main() -> Result<(), anyhow::Error> {
     // Let recording go for roughly three seconds.
     std::thread::sleep(std::time::Duration::from_secs(10));
     drop(stream);
-    writer.lock().unwrap().take().unwrap().finalize()?;
+    // writer.lock().unwrap().take().unwrap().finalize()?;
     println!("Recording {} complete!", PATH);
 
     Ok(())
@@ -199,14 +200,15 @@ fn write_input_data<T>(input: &[T], writer: &WavWriterHandle)
 where
     T: cpal::Sample,
 {
-    if let Ok(mut guard) = writer.try_lock() {
-        if let Some(writer) = guard.as_mut() {
-            for &sample in input.iter() {
-                let sample: U = cpal::Sample::from(&sample);
-                writer.write_sample(sample).ok();
-            }
-        }
-    }
+    println!("{}", input);
+    // if let Ok(mut guard) = writer.try_lock() {
+    //     if let Some(writer) = guard.as_mut() {
+    //         for &sample in input.iter() {
+    //             let sample: U = cpal::Sample::from(&sample);
+    //             writer.write_sample(sample).ok();
+    //         }
+    //     }
+    // }
 }
 
 // fn main() -> std::io::Result<()> {
