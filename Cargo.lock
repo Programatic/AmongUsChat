@@ -216,6 +216,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cmake"
+version = "0.1.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb6210b637171dfba4cda12e579ac6dc73f5165ad56133e5d72ef3131f320855"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "combine"
 version = "3.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -555,7 +564,9 @@ dependencies = [
  "clap",
  "cpal",
  "crossbeam",
- "opus",
+ "itertools",
+ "magnum-opus",
+ "rubato",
  "serde",
  "serde_json",
 ]
@@ -567,6 +578,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61124eeebbd69b8190558df225adf7e4caafce0d743919e5d6b19652314ec5ec"
 dependencies = [
  "cfg-if 1.0.0",
+]
+
+[[package]]
+name = "itertools"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "284f18f85651fe11e8a991b2adb42cb078325c996ed026d994719efcfca1d54b"
+dependencies = [
+ "either",
 ]
 
 [[package]]
@@ -692,6 +712,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "magnum-opus"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff49ad2a7313ae476b292c1e1b6bf17ad0542fc1d24880d85d455d8547a3ecc2"
+dependencies = [
+ "libc",
+ "opusic-sys",
+]
+
+[[package]]
 name = "matches"
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -791,6 +821,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-complex"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "747d632c0c558b87dbabbe6a82f3b4ae03720d0646ac5b7b4dae89394be5f2c5"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "num-derive"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -799,6 +838,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "num-integer"
+version = "0.1.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2cc698a63b549a70bc047073d2949cce27cd1c7b0a4a862d08a8031bc2801db"
+dependencies = [
+ "autocfg",
+ "num-traits",
 ]
 
 [[package]]
@@ -868,20 +917,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13bd41f508810a131401606d54ac32a467c97172d74ba7662562ebba5ad07fa0"
 
 [[package]]
-name = "opus"
-version = "0.2.1"
-source = "git+https://github.com/DoumanAsh/opus-rs/?branch=new_opus_bindings#3c165b385a03d9fc17919f42c9e1f1742aa5e75b"
-dependencies = [
- "opusic-sys",
-]
-
-[[package]]
 name = "opusic-sys"
-version = "0.2.3"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "100c11846cec53137020fecf80321102a66a697be0e80f6a2e5459de2f782103"
+checksum = "23951048225da736a68faae3989744578857d5c49e482238f878829133cef580"
 dependencies = [
- "cc",
+ "cmake",
 ]
 
 [[package]]
@@ -989,6 +1030,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "realfft"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29a38036df3019137318614d1bbaa0c04459f51b8640c6c475f5435509f128cf"
+dependencies = [
+ "rustfft",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.1.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1031,6 +1081,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cabe4fa914dec5870285fa7f71f602645da47c486e68486d2b4ceb4a343e90ac"
 
 [[package]]
+name = "rubato"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd573ac64f04bec39254cdebd0b2cc637076eff9e97ec66aeab38403cd746531"
+dependencies = [
+ "log",
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "realfft",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1049,6 +1112,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
 dependencies = [
  "semver",
+]
+
+[[package]]
+name = "rustfft"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f107ffb2ec15915d932b7b1537fe4d6efb36955ee2b06f8f759c80a0725f80b1"
+dependencies = [
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "strength_reduce",
+ "transpose",
 ]
 
 [[package]]
@@ -1230,6 +1306,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "213701ba3370744dcd1a12960caa4843b3d68b4d1c0a5d575e0d65b2ee9d16c0"
 
 [[package]]
+name = "strength_reduce"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3ff2f71c82567c565ba4b3009a9350a96a7269eaa4001ebedae926230bc2254"
+
+[[package]]
 name = "strsim"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1353,6 +1435,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a31142970826733df8241ef35dc040ef98c679ab14d7c3e54d827099b3acecaa"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "transpose"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3311ef71dea6a1fd6bf5bfc10ec5b4bef6174048f6b481dbc6ce915ff48c0a0"
+dependencies = [
+ "num-integer",
+ "strength_reduce",
 ]
 
 [[package]]
