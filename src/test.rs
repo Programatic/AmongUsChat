@@ -7,6 +7,7 @@ use cpal::{
 use magnum_opus::{Decoder, Encoder};
 use rubato::Resampler;
 use serde::Deserialize;
+use serde_json::json;
 use std::io::BufWriter;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -148,16 +149,15 @@ fn main() -> Result<(), anyhow::Error> {
                 if buff.len() >= 960 {
                     let mut slice_u8 = encoder.encode_vec_float(&buff[..960], 1500).unwrap();
 
-                    // let mut b = [0u8; 1];
-                    // b[0] = slice_u8.len() as u8;
+                    // slice_u8.insert(0, slice_u8.len() as u8);
 
-                    slice_u8.insert(0, slice_u8.len() as u8);
+                    let json = json!({
+                        "length": slice_u8.len(),
+                        "data": slice_u8,
+                    });
 
-                    // socket
-                        // .send_to(&b, "127.0.0.1:1337")
-                        // .expect("Failure to send 1");
                     socket
-                        .send_to(&slice_u8[..], "127.0.0.1:1337")
+                        .send_to(json.to_string().as_bytes(), "127.0.0.1:1337")
                         .expect("Failure to send 2");
 
                     buff.drain(..960);
