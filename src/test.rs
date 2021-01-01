@@ -5,11 +5,12 @@ use cpal::{
     Data, DefaultStreamConfigError,
 };
 use magnum_opus::{Decoder, Encoder};
+use parking_lot::Mutex;
 use rubato::Resampler;
 use serde::Deserialize;
 use std::io::BufWriter;
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{collections::VecDeque, fs::File};
 
 #[derive(Debug, Deserialize)]
@@ -124,44 +125,41 @@ fn main() -> Result<(), anyhow::Error> {
     let encode_buff2 = encode_buff.clone();
 
     let _t1 = std::thread::spawn(move || {
-        while true {
-            if let Ok(mut buff) = raw_buff2.lock() {
-                // println!("{}", buff.len());
-                while buff.len() > resampler.nbr_frames_needed() {
-                    let slice = buff[..resampler.nbr_frames_needed()].to_vec();
-                    let sampled = resampler.process(&vec![slice; 1]).unwrap();
+        loop {
+            let mut buff = raw_buff2.lock();
+            // println!("{}", buff.len());
+            while buff.len() > resampler.nbr_frames_needed() {
+                let slice = buff[..resampler.nbr_frames_needed()].to_vec();
+                let sampled = resampler.process(&vec![slice; 1]).unwrap();
 
-                    let mut b = sampled[0].to_owned();
-                    if let Ok(mut encode_buff) = encode_buff2.lock() {
-                        encode_buff.append(&mut b);
-                    }
+                let mut b = sampled[0].to_owned();
+                let mut encode_buff = encode_buff2.lock();
+                encode_buff.append(&mut b);
 
-                    buff.drain(..resampler.nbr_frames_needed());
-                }
+                buff.drain(..resampler.nbr_frames_needed());
             }
         }
     });
 
     let _t2 = std::thread::spawn(move || {
         while true {
-            if let Ok(mut buff) = encode_buff.lock() {
-                if buff.len() >= 960 {
-                    let mut slice_u8 = encoder.encode_vec_float(&buff[..960], 1500).unwrap();
+            let mut buff = encode_buff.lock();
+            if buff.len() >= 960 {
+                let mut slice_u8 = encoder.encode_vec_float(&buff[..960], 1500).unwrap();
 
-                    // let mut b = [0u8; 1];
-                    // b[0] = slice_u8.len() as u8;
+                // let mut b = [0u8; 1];
+                // b[0] = slice_u8.len() as u8;
 
-                    slice_u8.insert(0, slice_u8.len() as u8);
+                slice_u8.insert(0, slice_u8.len() as u8);
 
-                    // socket
-                        // .send_to(&b, "127.0.0.1:1337")
-                        // .expect("Failure to send 1");
-                    socket
-                        .send_to(&slice_u8[..], "127.0.0.1:1337")
-                        .expect("Failure to send 2");
+                // socket
+                // .send_to(&b, "127.0.0.1:1337")
+                // .expect("Failure to send 1");
+                socket
+                    .send_to(&slice_u8[..], "127.0.0.1:1337")
+                    .expect("Failure to send 2");
 
-                    buff.drain(..960);
-                }
+                buff.drain(..960);
             }
         }
     });
@@ -195,21 +193,17 @@ fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn write_input_data_f32(
-    input: &Data,
-    raw_buff: &Arc<Mutex<Vec<f32>>>,
-) {
+fn write_input_data_f32(input: &Data, raw_buff: &Arc<Mutex<Vec<f32>>>) {
     let mut inp = input.as_slice::<f32>().unwrap().to_vec();
 
-    if let Ok(mut raw) = raw_buff.lock() {
-        raw.append(&mut inp);
-    }
+    let mut raw = raw_buff.lock();
+    raw.append(&mut inp);
 }
 
 // let socket = socket.lock().unwrap();
-// 
+//
 // todo!("Do this");
-// 
+//
 // fn main() -> std::io::Result<()> {
 //     // let foo = Command::new("test.exe")
 //     // .output().unwrap();
@@ -230,7 +224,7 @@ fn write_input_data_f32(
 //
 //     Ok(())
 // }
-// 
+//
 // Maybe Get Back To
 // extern "C" {
 //     fn GetPid(name: *mut std::os::raw::c_char) -> u32;
@@ -249,35 +243,35 @@ fn write_input_data_f32(
 //         // println!("\n{}", GetPid(s.into_raw()));
 //     }
 // }
-// 
+//
 // fn main() -> anyhow::Result<()> {
 //     let host = cpal::default_host();
-// 
+//
 //     let device = host.default_output_device().unwrap();
-// 
+//
 //     println!("Output device: {}", device.name()?);
-// 
-    // let config = device.default_output_config().unwrap();
+//
+// let config = device.default_output_config().unwrap();
 //     println!("Default output config: {:?}", config);
-// 
+//
 //     match config.sample_format() {
 //         cpal::SampleFormat::F32 => run::<f32>(&device, &config.into()),
 //         cpal::SampleFormat::I16 => run::<i16>(&device, &config.into()),
 //         cpal::SampleFormat::U16 => run::<u16>(&device, &config.into()),
 //     }
 // }
-// 
+//
 // pub fn run<T>(device: &cpal::Device, config: &cpal::StreamConfig) -> Result<(), anyhow::Error>
 // where
 //     T: cpal::Sample,
 // {
 //     const PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/recorded.raw");
 //     let mut f = std::fs::File::open(PATH).unwrap();
-// 
+//
 //     use std::io::Read;
 //     let mut buff: Vec<u8> = Vec::new();
 //     f.read_to_end(&mut buff);
-// 
+//
 //     // let mut buff = unsafe {
 //     //     std::slice::from_raw_parts(
 //     //         buff.as_ptr() as *const f32,
@@ -285,14 +279,14 @@ fn write_input_data_f32(
 //     //     )
 //     // }
 //     // .to_vec();
-// 
+//
 //     println!("{:?}", buff);
-// 
+//
 //     todo!();
-// 
+//
 //     let mut decoder = magnum_opus::Decoder::new(48000, magnum_opus::Channels::Stereo)?;
 //     let mut output: Vec<f32> = Vec::with_capacity(buff.len());
-// 
+//
 //     for chunk in buff.chunks(20) {
 //         println!("Succ");
 //         let mut decode_buff = [0f32; 960*2*4];
@@ -300,13 +294,13 @@ fn write_input_data_f32(
 //         output.extend_from_slice(&decode_buff[..out]);
 //     }
 //     // output.truncate(out);
-// 
+//
 //     todo!("{}", output.len());
-// 
+//
 //     let mut dat_index = 0;
-// 
+//
 //     let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
-// 
+//
 //     let stream = device.build_output_stream(
 //         config,
 //         move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
@@ -315,13 +309,13 @@ fn write_input_data_f32(
 //         err_fn,
 //     )?;
 //     stream.play()?;
-// 
+//
 //     std::thread::sleep(std::time::Duration::from_millis(10000));
 //     // drop(output);
-// 
+//
 //     Ok(())
 // }
-// 
+//
 // fn write_data<'a, T>(output: &mut [T], channels: usize, data_index: &mut usize, data: &mut Vec<f32>)
 // where
 //     T: cpal::Sample,
