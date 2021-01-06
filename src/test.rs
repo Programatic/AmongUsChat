@@ -8,10 +8,10 @@ use magnum_opus::{Decoder, Encoder};
 use parking_lot::Mutex;
 use rubato::Resampler;
 use serde::Deserialize;
-use std::io::BufWriter;
 use std::process::Command;
 use std::sync::Arc;
 use std::{collections::VecDeque, fs::File};
+use std::{io::BufWriter, time::Instant};
 
 #[derive(Debug, Deserialize)]
 struct PlayerState {
@@ -124,43 +124,45 @@ fn main() -> Result<(), anyhow::Error> {
     let encode_buff = Arc::new(Mutex::new(Vec::<f32>::with_capacity(2000)));
     let encode_buff2 = encode_buff.clone();
 
-    let _t1 = std::thread::spawn(move || {
-        loop {
-            let mut buff = raw_buff2.lock();
-            // println!("{}", buff.len());
-            while buff.len() > resampler.nbr_frames_needed() {
-                let slice = buff[..resampler.nbr_frames_needed()].to_vec();
-                let sampled = resampler.process(&vec![slice; 1]).unwrap();
+    // let start = Instant::now();
+    // println!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis());
 
-                let mut b = sampled[0].to_owned();
-                let mut encode_buff = encode_buff2.lock();
-                encode_buff.append(&mut b);
+    let _t1 = std::thread::spawn(move || loop {
+        let mut buff = raw_buff2.lock();
+        let mut enc_buff = Vec::<f32>::with_capacity(960);
+        let chunks_iter = buff.chunks_exact(resampler.nbr_frames_needed());
+        let num_chunks = chunks_iter.len();
+        for chunk in chunks_iter {
+            let sampled = resampler.process(&vec![chunk.into(); 1]).unwrap();
 
-                buff.drain(..resampler.nbr_frames_needed());
-            }
+            let mut b = sampled[0].to_owned();
+            enc_buff.append(&mut b);
         }
+
+        buff.drain(..resampler.nbr_frames_needed() * num_chunks);
+        drop(buff);
+        let mut encode_buff = encode_buff2.lock();
+        encode_buff.append(&mut enc_buff);
     });
 
     let _t2 = std::thread::spawn(move || {
-        while true {
+        loop {
             let mut buff = encode_buff.lock();
-            if buff.len() >= 960 {
-                let mut slice_u8 = encoder.encode_vec_float(&buff[..960], 1500).unwrap();
-
-                // let mut b = [0u8; 1];
-                // b[0] = slice_u8.len() as u8;
+            let chunks_iter = buff.chunks_exact(960);
+            let num_chunks = chunks_iter.len();
+            for chunk in chunks_iter {
+                let mut slice_u8 = encoder.encode_vec_float(chunk, 1500).unwrap();
 
                 slice_u8.insert(0, slice_u8.len() as u8);
 
-                // socket
-                // .send_to(&b, "127.0.0.1:1337")
-                // .expect("Failure to send 1");
+                // println!("{:?}", Instant::now().duration_since(start));
+                // todo!();
+
                 socket
                     .send_to(&slice_u8[..], "127.0.0.1:1337")
                     .expect("Failure to send 2");
-
-                buff.drain(..960);
             }
+            buff.drain(..960 * num_chunks);
         }
     });
 
