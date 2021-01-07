@@ -3,6 +3,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     Device, Stream,
 };
+use magnum_opus::Decoder;
 use parking_lot::Mutex;
 use rubato::{FftFixedInOut, Resampler};
 use std::{
@@ -17,6 +18,7 @@ pub struct AudioOutput {
     audio_out_buffs: Arc<Mutex<HashMap<u8, Vec<f32>>>>,
     config: cpal::StreamConfig,
     device: Device,
+    decoders: Arc<Mutex<HashMap<u8, Decoder>>>,
 }
 
 pub fn start(udp_socket: UdpSocket) -> anyhow::Result<AudioOutput> {
@@ -32,6 +34,7 @@ pub fn start(udp_socket: UdpSocket) -> anyhow::Result<AudioOutput> {
         audio_out_buffs: Arc::new(Mutex::new(HashMap::<u8, Vec<f32>>::with_capacity(2000))),
         device: device,
         config: config.into(),
+        decoders: Arc::new(Mutex::new(HashMap::<u8, Decoder>::new())),
     };
 
     output_driver.start(udp_socket)?;
@@ -41,9 +44,8 @@ pub fn start(udp_socket: UdpSocket) -> anyhow::Result<AudioOutput> {
 
 impl AudioOutput {
     pub fn start(&self, udp_socket: UdpSocket) -> anyhow::Result<()> {
-        let mut decoder = magnum_opus::Decoder::new(48000, magnum_opus::Channels::Stereo)?;
-
         let resampler_buffs = self.resampler_buffs.clone();
+        let decoders = self.decoders.clone();
         // let resampler_buffs =
 
         let _ = std::thread::spawn(move || loop {
@@ -52,19 +54,18 @@ impl AudioOutput {
 
             let id = buff[0];
             let mut out_audio_dat = [0f32; 960];
-            let len = decoder
-                .decode_float(&buff[1..bytes], &mut out_audio_dat, false)
-                .unwrap();
+            let mut decoders = decoders.lock();
+            if let Some(decoder) = decoders.get_mut(&id) {
+                let len = decoder
+                    .decode_float(&buff[1..bytes], &mut out_audio_dat, false)
+                    .unwrap();
 
+                let mut resampler_buffs = resampler_buffs.lock();
 
-            let mut resampler_buffs = resampler_buffs.lock();
-
-            if let Some(resampler_buff) = resampler_buffs.get_mut(&id) {
-                resampler_buff.extend_from_slice(&out_audio_dat[..len * 2]);
+                if let Some(resampler_buff) = resampler_buffs.get_mut(&id) {
+                    resampler_buff.extend_from_slice(&out_audio_dat[..len * 2]);
+                }
             }
-            // else {
-            //     resampler_buffs.insert(id, Vec::from(out_audio_dat));
-            // }
         });
 
         Ok(())
@@ -77,11 +78,15 @@ impl AudioOutput {
 
         let resampler_buffs2 = self.resampler_buffs.clone();
         let audio_out_buffs2 = self.audio_out_buffs.clone();
-        let mut resampler = FftFixedInOut::<f32>::new(48000, sample_rate, 480, 1);
+        let mut resampler = FftFixedInOut::<f32>::new(48000, sample_rate, 960, 1);
 
         let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
 
         let audio_out_buffs = audio_out_buffs2.clone();
+
+        let mut decoders = self.decoders.lock();
+        decoders.insert(id, magnum_opus::Decoder::new(48000, magnum_opus::Channels::Stereo)?);
+        drop(decoders);
 
         let mut rb = resampler_buffs2.lock();
         rb.insert(id, Vec::with_capacity(1000));
@@ -142,7 +147,7 @@ fn write_data(
 {
     let mut audio_data = audio_data.lock();
     if let Some(data) = audio_data.get_mut(&id) {
-        println!("{}", data.len());
+        println!("{} {} {}", id, data.len(), output.len());
         let ub = if output.len() > data.len() {
             data.len()
         } else {
