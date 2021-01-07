@@ -29,16 +29,15 @@ fn main() -> anyhow::Result<()> {
     let socket = Arc::new(Mutex::new(socket));
     let socket2 = socket.clone();
 
-    let mut decode_buffs = HashMap::<u8, Vec<f32>>::new();
-
     let _ = std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(5));
-        let mut socket = socket2.lock();
         let json_out = json!({
             "type": "hb"
         });
 
         println!("Sending HB");
+
+        let mut socket = socket2.lock();
         socket.write(json_out.to_string().as_bytes()).unwrap();
     });
 
@@ -56,23 +55,17 @@ fn main() -> anyhow::Result<()> {
 
                     let mut clients = clients.lock();
                     clients.insert(id, new_client);
-                },
+                }
                 Some("disconnect") => {
                     println!("Peer disconnected");
-                },
+                }
                 _ => {}
             }
         }
     });
 
-    let _ = std::thread::spawn(move || loop {
-        let mut buff = [0u8; 1500];
-        let bytes = udp_socket.recv(&mut buff).unwrap();
 
-        println!("{:?}", &buff[..bytes]);
-
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    });
+        audio::output::start(udp_socket);
 
     loop {}
 

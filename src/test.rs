@@ -116,7 +116,7 @@ fn main() -> Result<(), anyhow::Error> {
     let mut resampler = rubato::FftFixedOut::<f32>::new(sample_rate as usize, 48000, 960, 1, 1);
 
     // let mut socket = std::net::UdpSocket::bind("192.168.1.82:1337")?;
-    let mut socket = std::net::UdpSocket::bind("127.0.0.1:1336")?;
+    let mut socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
 
     let raw_buff = Arc::new(Mutex::new(Vec::<f32>::with_capacity(2000)));
     let raw_buff2 = raw_buff.clone();
@@ -127,8 +127,10 @@ fn main() -> Result<(), anyhow::Error> {
     // let start = Instant::now();
     // println!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis());
 
+
     let _t1 = std::thread::spawn(move || loop {
         let mut buff = raw_buff2.lock();
+        println!("Raw {}", buff.len());
         let mut enc_buff = Vec::<f32>::with_capacity(960);
         let chunks_iter = buff.chunks_exact(resampler.nbr_frames_needed());
         let num_chunks = chunks_iter.len();
@@ -148,23 +150,29 @@ fn main() -> Result<(), anyhow::Error> {
     let _t2 = std::thread::spawn(move || {
         loop {
             let mut buff = encode_buff.lock();
+            if buff.len() > 0 {
+            println!("Encode {}", buff.len());
+            }
             let chunks_iter = buff.chunks_exact(960);
             let num_chunks = chunks_iter.len();
             for chunk in chunks_iter {
                 let mut slice_u8 = encoder.encode_vec_float(chunk, 1500).unwrap();
 
-                slice_u8.insert(0, slice_u8.len() as u8);
+                slice_u8.insert(0, 1);
+                slice_u8.insert(1, 0);
 
                 // println!("{:?}", Instant::now().duration_since(start));
                 // todo!();
 
                 socket
-                    .send_to(&slice_u8[..], "127.0.0.1:1337")
+                    .send_to(&slice_u8[..], "127.0.0.1:45628")
                     .expect("Failure to send 2");
             }
             buff.drain(..960 * num_chunks);
         }
     });
+
+
 
     println!("Default input config: {:?}", config);
 
@@ -189,10 +197,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     stream.play()?;
 
-    std::thread::sleep(std::time::Duration::from_secs(7200));
-    drop(stream);
-
-    Ok(())
+    loop {}
 }
 
 fn write_input_data_f32(input: &Data, raw_buff: &Arc<Mutex<Vec<f32>>>) {
