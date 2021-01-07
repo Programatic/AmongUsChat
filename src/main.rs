@@ -11,11 +11,17 @@ use std::{
 use client::Client;
 use serde_json::json;
 
+macro_rules! IP {
+    ( $port:literal ) => {
+        concat!("10.0.0.72:", $port)
+    };
+}
+
 fn main() -> anyhow::Result<()> {
     let clients = HashMap::<u8, Client>::new();
     let clients = Arc::new(Mutex::new(clients));
 
-    let mut socket = std::net::TcpStream::connect("127.0.0.1:45629")?;
+    let mut socket = std::net::TcpStream::connect(IP!(45629))?;
     let udp_socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
 
     let mut buff = [0u8; 1];
@@ -23,11 +29,13 @@ fn main() -> anyhow::Result<()> {
     socket.set_nonblocking(true)?;
     let id = buff[0];
 
-    udp_socket.connect("127.0.0.1:45628")?;
+    udp_socket.connect(IP!(45628))?;
     udp_socket.send(&Vec::from([0, id]).as_slice())?;
 
     let socket = Arc::new(Mutex::new(socket));
     let socket2 = socket.clone();
+
+    let mut audio_driver = audio::output::start(udp_socket)?;
 
     let _ = std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(5));
@@ -41,31 +49,35 @@ fn main() -> anyhow::Result<()> {
         socket.write(json_out.to_string().as_bytes()).unwrap();
     });
 
-    let _ = std::thread::spawn(move || loop {
-        let mut socket = socket.lock();
-        let mut buff = [0u8; 1024];
-        let res = socket.read(&mut buff);
-        if let Ok(bytes) = res {
-            let incoming_json: serde_json::Value = serde_json::from_slice(&buff[..bytes]).unwrap();
-            match incoming_json["type"].as_str() {
-                Some("connect") => {
-                    println!("New peer!");
-                    let id = incoming_json["id"].as_u64().unwrap() as u8;
-                    let new_client = Client { id: id };
+    let _ = std::thread::spawn(move || {
+        let mut streams = Vec::new();
+        loop {
+            let mut socket = socket.lock();
+            let mut buff = [0u8; 1024];
+            let res = socket.read(&mut buff);
+            if let Ok(bytes) = res {
+                let incoming_json: serde_json::Value =
+                    serde_json::from_slice(&buff[..bytes]).unwrap();
+                match incoming_json["type"].as_str() {
+                    Some("connect") => {
+                        println!("New peer!");
+                        let id = incoming_json["id"].as_u64().unwrap() as u8;
+                        let new_client = Client { id: id };
 
-                    let mut clients = clients.lock();
-                    clients.insert(id, new_client);
+                        streams.push(audio_driver.new_stream(id).unwrap());
+
+                        let mut clients = clients.lock();
+                        clients.insert(id, new_client);
+                    }
+                    Some("disconnect") => {
+                        // TODO: Implement
+                        println!("Peer disconnected");
+                    }
+                    _ => {}
                 }
-                Some("disconnect") => {
-                    println!("Peer disconnected");
-                }
-                _ => {}
             }
         }
     });
-
-
-        audio::output::start(udp_socket);
 
     loop {}
 

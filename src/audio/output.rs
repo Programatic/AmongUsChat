@@ -1,127 +1,163 @@
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use anyhow::Result;
+use cpal::{
+    traits::{DeviceTrait, HostTrait, StreamTrait},
+    Device, Stream,
+};
 use parking_lot::Mutex;
 use rubato::{FftFixedInOut, Resampler};
-use std::{collections::HashMap, net::UdpSocket, sync::Arc};
+use std::{
+    collections::HashMap,
+    net::UdpSocket,
+    sync::{atomic::AtomicBool, Arc},
+};
 
-pub fn start(udp_socket: UdpSocket) -> anyhow::Result<()> {
+pub struct AudioOutput {
+    active_threads: HashMap<u8, AtomicBool>,
+    resampler_buffs: Arc<Mutex<HashMap<u8, Vec<f32>>>>,
+    audio_out_buffs: Arc<Mutex<HashMap<u8, Vec<f32>>>>,
+    config: cpal::StreamConfig,
+    device: Device,
+}
+
+pub fn start(udp_socket: UdpSocket) -> anyhow::Result<AudioOutput> {
     let host = cpal::default_host();
-
     let device = host.default_output_device().unwrap();
 
     let config = device.default_output_config().unwrap();
     println!("Default output config: {:?}", config);
 
+    let output_driver = AudioOutput {
+        active_threads: HashMap::new(),
+        resampler_buffs: Arc::new(Mutex::new(HashMap::<u8, Vec<f32>>::with_capacity(2000))),
+        audio_out_buffs: Arc::new(Mutex::new(HashMap::<u8, Vec<f32>>::with_capacity(2000))),
+        device: device,
+        config: config.into(),
+    };
 
-    std::thread::spawn(move || -> anyhow::Result<()> {
-        run(&device, &mut config.into(), udp_socket)
-    });
+    output_driver.start(udp_socket)?;
 
-    // match config.sample_format() {
-    //     cpal::SampleFormat::F32 => run::<f32>(&device, &mut config.into()),
-    //     cpal::SampleFormat::I16 => run::<i16>(&device, &mut config.into()),
-    //     cpal::SampleFormat::U16 => run::<u16>(&device, &mut config.into()),
-    // }
-
-    Ok(())
+    Ok(output_driver)
 }
 
-fn run(
-    device: &cpal::Device,
-    config: &mut cpal::StreamConfig,
-    udp_socket: UdpSocket,
-) -> Result<(), anyhow::Error>
-// where
-    // T: cpal::Sample,
-{
-    let sample_rate = config.sample_rate.0 as usize;
-    let channels = config.channels as usize;
+impl AudioOutput {
+    pub fn start(&self, udp_socket: UdpSocket) -> anyhow::Result<()> {
+        let mut decoder = magnum_opus::Decoder::new(48000, magnum_opus::Channels::Stereo)?;
 
-    let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
+        let resampler_buffs = self.resampler_buffs.clone();
+        // let resampler_buffs =
 
-    let mut decoder = magnum_opus::Decoder::new(48000, magnum_opus::Channels::Stereo)?;
-    let mut resampler = FftFixedInOut::<f32>::new(48000, sample_rate, 480, 1);
+        let _ = std::thread::spawn(move || loop {
+            let mut buff = [0u8; 1500];
+            let bytes = udp_socket.recv(&mut buff).unwrap();
 
-    let resampler_buffs = Arc::new(Mutex::new(HashMap::<u8, Vec<f32>>::with_capacity(2000)));
-    let resampler_buffs2 = resampler_buffs.clone();
-    let audio_out_buffs = Arc::new(Mutex::new(HashMap::<u8, Vec<f32>>::with_capacity(2000)));
-    let audio_out_buffs2 = audio_out_buffs.clone();
+            let id = buff[0];
+            let mut out_audio_dat = [0f32; 960];
+            let len = decoder
+                .decode_float(&buff[1..bytes], &mut out_audio_dat, false)
+                .unwrap();
 
-    let _ = std::thread::spawn(move || loop {
-        let mut buff = [0u8; 1500];
-        let bytes = udp_socket.recv(&mut buff).unwrap();
 
-        let id = buff[0];
-        let mut out_audio_dat = [0f32; 960];
-        let len = decoder
-            .decode_float(&buff[1..bytes], &mut out_audio_dat, false)
-            .unwrap();
+            let mut resampler_buffs = resampler_buffs.lock();
 
-        let mut resampler_buffs = resampler_buffs.lock();
-        if let Some(resampler_buff) = resampler_buffs.get_mut(&id) {
-            resampler_buff.extend_from_slice(&out_audio_dat[..len*2]);
-        } else {
-            resampler_buffs.insert(id, Vec::from(out_audio_dat));
-        }
-    });
-
-    let _ = std::thread::spawn(move || loop {
-        let mut buffs = resampler_buffs2.lock();
-        let mut audio_out = audio_out_buffs2.lock();
-        for (id, buff) in buffs.iter_mut() {
-            let iter = buff.chunks_exact(resampler.nbr_frames_needed());
-            let num_chunks = iter.len();
-            for chunk in iter {
-                let mut processed = resampler.process(&vec![chunk.to_vec()]).unwrap()[0].to_owned();
-                if let Some(ao) = audio_out.get_mut(id) {
-                    ao.append(&mut processed);
-                } else {
-                    audio_out.insert(*id, Vec::from(processed));
-                }
+            if let Some(resampler_buff) = resampler_buffs.get_mut(&id) {
+                resampler_buff.extend_from_slice(&out_audio_dat[..len * 2]);
             }
+            // else {
+            //     resampler_buffs.insert(id, Vec::from(out_audio_dat));
+            // }
+        });
 
-            buff.drain(..num_chunks * resampler.nbr_frames_needed());
-        }
-    });
+        Ok(())
+    }
 
-    let stream = device.build_output_stream(
-        config,
-        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            write_data(data, channels, &audio_out_buffs)
-        },
-        err_fn,
-    )?;
-    stream.play()?;
+    pub fn new_stream(&mut self, id: u8) -> Result<Stream> {
+        println!("Creating New Stream");
+        let sample_rate = self.config.sample_rate.0 as usize;
+        let channels = self.config.channels as usize;
 
-    loop {}
+        let resampler_buffs2 = self.resampler_buffs.clone();
+        let audio_out_buffs2 = self.audio_out_buffs.clone();
+        let mut resampler = FftFixedInOut::<f32>::new(48000, sample_rate, 480, 1);
+
+        let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
+
+        let audio_out_buffs = audio_out_buffs2.clone();
+
+        let mut rb = resampler_buffs2.lock();
+        rb.insert(id, Vec::with_capacity(1000));
+        drop(rb);
+
+        let mut ab = audio_out_buffs2.lock();
+        ab.insert(id, Vec::with_capacity(1000));
+        drop(ab);
+
+        std::thread::spawn(move || loop {
+            let mut buffs = resampler_buffs2.lock();
+            let csize = resampler.nbr_frames_needed();
+
+            if let Some(buff) = buffs.get_mut(&id) {
+                let iter = buff.chunks_exact(csize);
+                let num_chunks = iter.len();
+
+                let mut proc = Vec::new();
+
+                for chunk in iter {
+                    let mut processed = resampler.process(&vec![chunk.to_vec()]).unwrap();
+
+                    proc.append(&mut processed[0]);
+                }
+
+                let mut audio_out = audio_out_buffs2.lock();
+                if let Some(ao_buff) = audio_out.get_mut(&id) {
+                    // println!("{}", ao_buff.len());
+                    ao_buff.append(&mut proc);
+                }
+
+                buff.drain(..num_chunks * csize);
+            }
+        });
+
+        let stream = self.device.build_output_stream(
+            &self.config,
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                write_data(data, channels, &audio_out_buffs, id)
+            },
+            err_fn,
+        )?;
+
+        stream.play()?;
+
+        Ok(stream)
+    }
 }
 
-fn write_data(output: &mut [f32], channels: usize, audio_data: &Arc<Mutex<HashMap<u8, Vec<f32>>>>)
+fn write_data(
+    output: &mut [f32],
+    channels: usize,
+    audio_data: &Arc<Mutex<HashMap<u8, Vec<f32>>>>,
+    id: u8,
+)
 // where
 // T: cpal::Sample,
 {
     let mut audio_data = audio_data.lock();
-    let mut iters = Vec::new();
-    for (_, buff) in audio_data.iter_mut() {
-        let ub = if output.len() > buff.len() {
-            buff.len()
+    if let Some(data) = audio_data.get_mut(&id) {
+        println!("{}", data.len());
+        let ub = if output.len() > data.len() {
+            data.len()
         } else {
             output.len()
         };
 
-        iters.push(buff.drain(..ub));
-    }
+        let mut iter = data.drain(..ub);
 
-    for frame in output.chunks_mut(channels) {
-        for sample in frame.iter_mut() {
-            let mut s = 0f32;
-            for i in iters.iter_mut() {
-                if let Some(val) = i.next() {
-                    s += val;
+        for frame in output.chunks_mut(channels) {
+            for sample in frame.iter_mut() {
+                if let Some(s) = iter.next() {
+                    let value = cpal::Sample::from::<f32>(&s); // Mult here for volume
+                    *sample = value;
                 }
             }
-            let value = cpal::Sample::from::<f32>(&(s * 1f32));
-            *sample = value;
         }
     }
-
 }

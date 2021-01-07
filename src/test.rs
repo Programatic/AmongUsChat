@@ -53,6 +53,12 @@ struct SendData<'a> {
     audioData: bool,
 }
 
+macro_rules! IP {
+    ( $port:literal ) => {
+        concat!("10.0.0.72:", $port)
+    };
+}
+
 fn main() -> Result<(), anyhow::Error> {
     // let foo = Command::new("test.exe").output().unwrap();
     //
@@ -95,6 +101,16 @@ fn main() -> Result<(), anyhow::Error> {
     //     }
     // });
 
+    let mut socket = std::net::TcpStream::connect(IP!(45629))?;
+
+    use std::io::Read;
+    let mut buff = [0u8; 1];
+    socket.read(&mut buff);
+
+    let id = buff[0];
+
+    println!("{}", buff[0]);
+
     let mut encoder = magnum_opus::Encoder::new(
         48000,
         magnum_opus::Channels::Stereo,
@@ -127,10 +143,9 @@ fn main() -> Result<(), anyhow::Error> {
     // let start = Instant::now();
     // println!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis());
 
-
     let _t1 = std::thread::spawn(move || loop {
         let mut buff = raw_buff2.lock();
-        println!("Raw {}", buff.len());
+        // println!("Raw {}", buff.len());
         let mut enc_buff = Vec::<f32>::with_capacity(960);
         let chunks_iter = buff.chunks_exact(resampler.nbr_frames_needed());
         let num_chunks = chunks_iter.len();
@@ -150,29 +165,27 @@ fn main() -> Result<(), anyhow::Error> {
     let _t2 = std::thread::spawn(move || {
         loop {
             let mut buff = encode_buff.lock();
-            if buff.len() > 0 {
-            println!("Encode {}", buff.len());
-            }
+            // if buff.len() > 0 {
+            // println!("Encode {}", buff.len());
+            // }
             let chunks_iter = buff.chunks_exact(960);
             let num_chunks = chunks_iter.len();
             for chunk in chunks_iter {
                 let mut slice_u8 = encoder.encode_vec_float(chunk, 1500).unwrap();
 
                 slice_u8.insert(0, 1);
-                slice_u8.insert(1, 0);
+                slice_u8.insert(1, id);
 
                 // println!("{:?}", Instant::now().duration_since(start));
                 // todo!();
 
                 socket
-                    .send_to(&slice_u8[..], "127.0.0.1:45628")
+                    .send_to(&slice_u8[..], IP!(45628))
                     .expect("Failure to send 2");
             }
             buff.drain(..960 * num_chunks);
         }
     });
-
-
 
     println!("Default input config: {:?}", config);
 
