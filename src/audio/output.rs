@@ -3,7 +3,6 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     Device, Stream,
 };
-use magnum_opus::Decoder;
 use parking_lot::Mutex;
 use rubato::{FftFixedInOut, Resampler};
 use std::{
@@ -18,10 +17,9 @@ pub struct AudioOutput {
     audio_out_buffs: Arc<Mutex<HashMap<u8, Vec<f32>>>>,
     config: cpal::StreamConfig,
     device: Device,
-    decoders: Arc<Mutex<HashMap<u8, Decoder>>>,
 }
 
-pub fn start(udp_socket: UdpSocket) -> anyhow::Result<AudioOutput> {
+pub fn start(udp_socket: UdpSocket) -> anyhow::Result<(AudioOutput, Stream)> {
     let host = cpal::default_host();
     let device = host.default_output_device().unwrap();
 
@@ -34,19 +32,21 @@ pub fn start(udp_socket: UdpSocket) -> anyhow::Result<AudioOutput> {
         audio_out_buffs: Arc::new(Mutex::new(HashMap::<u8, Vec<f32>>::with_capacity(2000))),
         device: device,
         config: config.into(),
-        decoders: Arc::new(Mutex::new(HashMap::<u8, Decoder>::new())),
     };
 
-    output_driver.start(udp_socket)?;
+    let stream = output_driver.start(udp_socket)?;
 
-    Ok(output_driver)
+    Ok((output_driver, stream))
 }
 
 impl AudioOutput {
-    pub fn start(&self, udp_socket: UdpSocket) -> anyhow::Result<()> {
+    pub fn start(&self, udp_socket: UdpSocket) -> anyhow::Result<Stream> {
+        let mut decoder = magnum_opus::Decoder::new(48000, magnum_opus::Channels::Stereo)?;
+
+        let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
+
         let resampler_buffs = self.resampler_buffs.clone();
-        let decoders = self.decoders.clone();
-        // let resampler_buffs =
+        let audio_out_buffs = self.audio_out_buffs.clone();
 
         let _ = std::thread::spawn(move || loop {
             let mut buff = [0u8; 1500];
@@ -54,39 +54,36 @@ impl AudioOutput {
 
             let id = buff[0];
             let mut out_audio_dat = [0f32; 960];
-            let mut decoders = decoders.lock();
-            if let Some(decoder) = decoders.get_mut(&id) {
-                let len = decoder
-                    .decode_float(&buff[1..bytes], &mut out_audio_dat, false)
-                    .unwrap();
+            let len = decoder
+                .decode_float(&buff[1..bytes], &mut out_audio_dat, false)
+                .unwrap();
 
-                let mut resampler_buffs = resampler_buffs.lock();
+            let mut resampler_buffs = resampler_buffs.lock();
 
-                if let Some(resampler_buff) = resampler_buffs.get_mut(&id) {
-                    resampler_buff.extend_from_slice(&out_audio_dat[..len * 2]);
-                }
+            if let Some(resampler_buff) = resampler_buffs.get_mut(&id) {
+                resampler_buff.extend_from_slice(&out_audio_dat[..len * 2]);
             }
         });
 
-        Ok(())
+        let stream = self.device.build_output_stream(
+            &self.config,
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                write_data(data, &audio_out_buffs)
+            },
+            err_fn,
+        )?;
+
+        Ok(stream)
     }
 
-    pub fn new_stream(&mut self, id: u8) -> Result<Stream> {
+    pub fn new_stream(&mut self, id: u8) -> Result<()> {
         println!("Creating New Stream");
         let sample_rate = self.config.sample_rate.0 as usize;
         let channels = self.config.channels as usize;
 
         let resampler_buffs2 = self.resampler_buffs.clone();
         let audio_out_buffs2 = self.audio_out_buffs.clone();
-        let mut resampler = FftFixedInOut::<f32>::new(48000, sample_rate, 960, 1);
-
-        let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
-
-        let audio_out_buffs = audio_out_buffs2.clone();
-
-        let mut decoders = self.decoders.lock();
-        decoders.insert(id, magnum_opus::Decoder::new(48000, magnum_opus::Channels::Stereo)?);
-        drop(decoders);
+        let mut resampler = FftFixedInOut::<f32>::new(48000, sample_rate, 480, 1);
 
         let mut rb = resampler_buffs2.lock();
         rb.insert(id, Vec::with_capacity(1000));
@@ -114,7 +111,6 @@ impl AudioOutput {
 
                 let mut audio_out = audio_out_buffs2.lock();
                 if let Some(ao_buff) = audio_out.get_mut(&id) {
-                    // println!("{}", ao_buff.len());
                     ao_buff.append(&mut proc);
                 }
 
@@ -122,47 +118,40 @@ impl AudioOutput {
             }
         });
 
-        let stream = self.device.build_output_stream(
-            &self.config,
-            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                write_data(data, channels, &audio_out_buffs, id)
-            },
-            err_fn,
-        )?;
-
-        stream.play()?;
-
-        Ok(stream)
+        Ok(())
     }
 }
 
-fn write_data(
-    output: &mut [f32],
-    channels: usize,
-    audio_data: &Arc<Mutex<HashMap<u8, Vec<f32>>>>,
-    id: u8,
-)
+fn write_data(output: &mut [f32], audio_data: &Arc<Mutex<HashMap<u8, Vec<f32>>>>)
 // where
 // T: cpal::Sample,
 {
     let mut audio_data = audio_data.lock();
-    if let Some(data) = audio_data.get_mut(&id) {
-        println!("{} {} {}", id, data.len(), output.len());
-        let ub = if output.len() > data.len() {
-            data.len()
+    let mut iters = Vec::new();
+    for (id, buff) in audio_data.iter_mut() {
+        println!("{} {}", id, buff.len());
+        let ub = if output.len() > buff.len() {
+            buff.len()
         } else {
             output.len()
         };
 
-        let mut iter = data.drain(..ub);
+        iters.push(buff.drain(..ub));
+    }
 
-        for frame in output.chunks_mut(channels) {
-            for sample in frame.iter_mut() {
-                if let Some(s) = iter.next() {
-                    let value = cpal::Sample::from::<f32>(&s); // Mult here for volume
-                    *sample = value;
+        for sample in output.iter_mut() {
+            let mut s = 0f32;
+            let mut div = 0;
+            for i in iters.iter_mut() {
+                if let Some(val) = i.next() {
+                    s += val;
+                    div += 1;
                 }
             }
+            let value = cpal::Sample::from::<f32>(&(s/div as f32));
+            *sample = value;
         }
-    }
+
 }
+
+

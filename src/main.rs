@@ -1,6 +1,7 @@
 mod audio;
 mod client;
 
+use cpal::traits::StreamTrait;
 use parking_lot::Mutex;
 use std::{
     collections::HashMap,
@@ -35,7 +36,7 @@ fn main() -> anyhow::Result<()> {
     let socket = Arc::new(Mutex::new(socket));
     let socket2 = socket.clone();
 
-    let mut audio_driver = audio::output::start(udp_socket)?;
+    let (mut audio_driver, stream) = audio::output::start(udp_socket)?;
 
     let _ = std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(5));
@@ -50,7 +51,7 @@ fn main() -> anyhow::Result<()> {
     });
 
     let _ = std::thread::spawn(move || {
-        let mut streams = Vec::new();
+        // let mut streams = Vec::new();
         loop {
             let mut socket = socket.lock();
             let mut buff = [0u8; 1024];
@@ -64,7 +65,8 @@ fn main() -> anyhow::Result<()> {
                         let id = incoming_json["id"].as_u64().unwrap() as u8;
                         let new_client = Client { id: id };
 
-                        streams.push(audio_driver.new_stream(id).unwrap());
+                        // streams.push(audio_driver.new_stream(id).unwrap());
+                        audio_driver.new_stream(id);
 
                         let mut clients = clients.lock();
                         clients.insert(id, new_client);
@@ -78,6 +80,8 @@ fn main() -> anyhow::Result<()> {
             }
         }
     });
+
+    stream.play()?;
 
     loop {}
 
