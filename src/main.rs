@@ -3,18 +3,15 @@ mod client;
 
 use cpal::traits::StreamTrait;
 use parking_lot::Mutex;
-use std::{
-    collections::HashMap,
-    io::{Read, Write},
-    sync::Arc,
-};
+use core::panic;
+use std::{collections::HashMap, io::{Read, Write}, net::UdpSocket, sync::Arc};
 
 use client::Client;
 use serde_json::json;
 
 macro_rules! IP {
     ( $port:literal ) => {
-        concat!("10.0.0.72:", $port)
+        concat!("192.168.1.227", ":", $port)
     };
 }
 
@@ -23,22 +20,24 @@ fn main() -> anyhow::Result<()> {
     let clients = Arc::new(Mutex::new(clients));
 
     let mut socket = std::net::TcpStream::connect(IP!(45629))?;
-    let udp_socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+    // let udp_socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
 
     let mut buff = [0u8; 1];
     socket.read(&mut buff)?;
     socket.set_nonblocking(true)?;
+
     let id = buff[0];
 
-    udp_socket.connect(IP!(45628))?;
-    udp_socket.send(&Vec::from([0, id]).as_slice())?;
+    // udp_socket.connect(IP!(45628))?;
+    // udp_socket.send(&Vec::from([0, id]).as_slice())?;
 
     let socket = Arc::new(Mutex::new(socket));
     let socket2 = socket.clone();
 
-    let (mut audio_driver, stream) = audio::output::start(udp_socket)?;
+    // let (mut audio_driver, stream) = audio::output::start(udp_socket)?;
+    let mut audio_driver = audio::output::new();
 
-    let _ = std::thread::spawn(move || loop {
+    std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(5));
         let json_out = json!({
             "type": "hb"
@@ -50,7 +49,7 @@ fn main() -> anyhow::Result<()> {
         socket.write(json_out.to_string().as_bytes()).unwrap();
     });
 
-    let _ = std::thread::spawn(move || {
+    std::thread::spawn(move || -> anyhow::Result<()> {
         // let mut streams = Vec::new();
         loop {
             let mut socket = socket.lock();
@@ -62,11 +61,19 @@ fn main() -> anyhow::Result<()> {
                 match incoming_json["type"].as_str() {
                     Some("connect") => {
                         println!("New peer!");
-                        let id = incoming_json["id"].as_u64().unwrap() as u8;
+                        let incoming_id = incoming_json["id"].as_u64().unwrap() as u8;
                         let new_client = Client { id: id };
 
+                        let nsock = UdpSocket::bind("0.0.0.0:0")?;
+
+                        println!("{:#?}", nsock);
+
+                        guaranteed_send(&nsock, &[0, id, incoming_id])?;
+
+                        panic!();
+
                         // streams.push(audio_driver.new_stream(id).unwrap());
-                        audio_driver.new_stream(id);
+                        audio_driver.new_stream(id, nsock)?;
 
                         let mut clients = clients.lock();
                         clients.insert(id, new_client);
@@ -81,9 +88,31 @@ fn main() -> anyhow::Result<()> {
         }
     });
 
-    stream.play()?;
+    // stream.play()?;
 
     loop {}
 
     // Ok(())
+}
+
+// Should Only be used in very specific scenarios
+fn guaranteed_send(udp_socket: &UdpSocket, msg: &[u8]) -> anyhow::Result<()> {
+    let udp_socket = udp_socket.try_clone()?;
+    udp_socket.set_nonblocking(false)?;
+    udp_socket.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+
+    println!("{:?}", msg);
+
+    udp_socket.send_to(msg, IP!(45628))?;
+
+    //TODO: Checksum or some other validation
+    let mut buff = [3; 0];
+    while let Err(_) = udp_socket.recv(&mut buff) {
+        println!("Error Sending Message");
+        continue;
+    }
+
+    panic!();
+
+    Ok(())
 }
