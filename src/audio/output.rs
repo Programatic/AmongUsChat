@@ -1,5 +1,5 @@
 use cpal::{
-    traits::{DeviceTrait, HostTrait},
+    traits::{DeviceTrait, HostTrait, StreamTrait},
     Device, Stream,
 };
 use magnum_opus::Decoder;
@@ -75,6 +75,8 @@ impl AudioOutput {
             err_fn,
         )?;
 
+        stream.play()?;
+
         Ok(stream)
     }
 
@@ -87,14 +89,19 @@ impl AudioOutput {
         let mut resampler = FftFixedInOut::<f32>::new(48000, sample_rate, 960, 1);
         let mut resampler_buff = Vec::with_capacity(2000);
 
+        let mut buffs = self.audio_out_buffs.lock();
+        buffs.insert(id, Vec::with_capacity(1000));
+
         std::thread::spawn(move || loop {
+
             let mut buff = [0u8; 1500];
             let bytes = udp_socket.recv(&mut buff).unwrap();
 
-            let id = buff[0];
+            // println!("{:?}", &buff[..bytes]);
+
             let mut out_audio_dat = [0f32; 960];
             let len = decoder
-                .decode_float(&buff[1..bytes], &mut out_audio_dat, false)
+                .decode_float(&buff[..bytes], &mut out_audio_dat, false)
                 .unwrap();
 
             resampler_buff.extend_from_slice(&out_audio_dat[..len * 2]);
@@ -103,6 +110,7 @@ impl AudioOutput {
 
             let csize = resampler.nbr_frames_needed();
 
+            while resampler_buff.len() >= csize {
             let iter = resampler_buff.chunks_exact(csize);
             let num_chunks = iter.len();
             let mut proc = Vec::new();
@@ -114,11 +122,12 @@ impl AudioOutput {
 
             let mut audio_out = audio_out_buffs.lock();
             if let Some(ao_buff) = audio_out.get_mut(&id) {
-                // println!("{}", ao_buff.len());
+                println!("{}", ao_buff.len());
                 ao_buff.append(&mut proc);
             }
 
             resampler_buff.drain(..num_chunks * csize);
+        }
         });
 
         // let sample_rate = self.config.sample_rate.0 as usize;
@@ -191,20 +200,14 @@ fn write_data(output: &mut [f32], audio_data: &Arc<Mutex<HashMap<u8, Vec<f32>>>>
 
     for sample in output.iter_mut() {
         let mut s = 0f32;
-        let mut div = 0;
         for i in iters.iter_mut() {
             if let Some(val) = i.next() {
-                s = val + s - s * val;
-                // s = s + val;
-                // div += 1;
+                // s = val + s - s * val;
+                s = s + val;
             }
         }
 
-        // if div == 0 {
-        //     s = 0.;
-        // } else {
-        //     s = s/div as f32;
-        // }
+        s /= iters.len() as f32;
 
         if s > 1. {
             s = 1.;
@@ -214,14 +217,10 @@ fn write_data(output: &mut [f32], audio_data: &Arc<Mutex<HashMap<u8, Vec<f32>>>>
             s = -1.;
         }
 
-        println!("{}", s);
+        // println!("{}", s);
 
-        let value = cpal::Sample::from::<f32>(&(s));
-        // if iters.len() > 0 {
-        // if let Some(s) = iters[0].next() {
-        // let value = cpal::Sample::from::<f32>(&s);
+        let value = cpal::Sample::from::<f32>(&(s * 0.5f32));
         *sample = value;
-        // }
-        // }
+
     }
 }

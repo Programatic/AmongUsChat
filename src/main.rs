@@ -36,6 +36,7 @@ fn main() -> anyhow::Result<()> {
 
     // let (mut audio_driver, stream) = audio::output::start(udp_socket)?;
     let mut audio_driver = audio::output::new();
+    let _stream = audio_driver.start()?; // Needed to make sure stream does not get dropped
 
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(5));
@@ -65,12 +66,11 @@ fn main() -> anyhow::Result<()> {
                         let new_client = Client { id: id };
 
                         let nsock = UdpSocket::bind("0.0.0.0:0")?;
+                        nsock.connect(IP!(45628))?;
 
                         println!("{:#?}", nsock);
 
                         guaranteed_send(&nsock, &[0, id, incoming_id])?;
-
-                        panic!();
 
                         // streams.push(audio_driver.new_stream(id).unwrap());
                         audio_driver.new_stream(id, nsock)?;
@@ -96,6 +96,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 // Should Only be used in very specific scenarios
+
 fn guaranteed_send(udp_socket: &UdpSocket, msg: &[u8]) -> anyhow::Result<()> {
     let udp_socket = udp_socket.try_clone()?;
     udp_socket.set_nonblocking(false)?;
@@ -105,14 +106,19 @@ fn guaranteed_send(udp_socket: &UdpSocket, msg: &[u8]) -> anyhow::Result<()> {
 
     udp_socket.send_to(msg, IP!(45628))?;
 
-    //TODO: Checksum or some other validation
-    let mut buff = [3; 0];
-    while let Err(_) = udp_socket.recv(&mut buff) {
-        println!("Error Sending Message");
-        continue;
-    }
+    // TODO: Proper error handling
+    // TODO: Checksum or some other validation
+    let mut buff = [0; 3];
+    let mut attmp = 0;
 
-    panic!();
+    while let Err(x) = udp_socket.recv(&mut buff) {
+        attmp += 1;
+        udp_socket.send(msg)?;
+
+        if attmp >= 5 {
+            eprintln!("Failed to Send UDP Message: {}", x);
+        }
+    }
 
     Ok(())
 }
