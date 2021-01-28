@@ -113,7 +113,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     println!("{}", buff[0]);
 
-    panic!();
+    // panic!();
 
     let mut encoder = magnum_opus::Encoder::new(
         48000,
@@ -177,8 +177,8 @@ fn main() -> Result<(), anyhow::Error> {
             for chunk in chunks_iter {
                 let mut slice_u8 = encoder.encode_vec_float(chunk, 1500).unwrap();
 
-                // slice_u8.insert(0, 1);
-                // slice_u8.insert(1, id);
+                slice_u8.insert(0, 1);
+                slice_u8.insert(1, id);
 
                 // println!("{:?}", Instant::now().duration_since(start));
                 // todo!();
