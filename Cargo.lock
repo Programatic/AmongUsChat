@@ -44,6 +44,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "amonguschat"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cc",
+ "clap",
+ "cpal",
+ "crossbeam",
+ "magnum-opus",
+ "parking_lot",
+ "rand",
+ "rubato",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ansi_term"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -564,23 +581,6 @@ dependencies = [
  "matches",
  "unicode-bidi",
  "unicode-normalization",
-]
-
-[[package]]
-name = "injectclient"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cc",
- "clap",
- "cpal",
- "crossbeam",
- "magnum-opus",
- "parking_lot",
- "rand",
- "rubato",
- "serde",
- "serde_json",
 ]
 
 [[package]]

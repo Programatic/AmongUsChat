@@ -97,6 +97,10 @@ impl AudioOutput {
             let mut buff = [0u8; 1500];
             let bytes = udp_socket.recv(&mut buff).unwrap();
 
+            if bytes == 0 {
+                continue;
+            }
+
             // println!("{:?}", &buff[..bytes]);
 
             let mut out_audio_dat = [0f32; 960];
@@ -122,7 +126,7 @@ impl AudioOutput {
 
             let mut audio_out = audio_out_buffs.lock();
             if let Some(ao_buff) = audio_out.get_mut(&id) {
-                println!("{}", ao_buff.len());
+                // println!("{}", ao_buff.len());
                 ao_buff.append(&mut proc);
             }
 
@@ -207,7 +211,9 @@ fn write_data(output: &mut [f32], audio_data: &Arc<Mutex<HashMap<u8, Vec<f32>>>>
             }
         }
 
-        s /= iters.len() as f32;
+        if iters.len() != 0 { 
+            s /= iters.len() as f32;
+        }
 
         if s > 1. {
             s = 1.;
@@ -220,6 +226,7 @@ fn write_data(output: &mut [f32], audio_data: &Arc<Mutex<HashMap<u8, Vec<f32>>>>
         // println!("{}", s);
 
         let value = cpal::Sample::from::<f32>(&(s * 0.5f32));
+
         *sample = value;
 
     }
